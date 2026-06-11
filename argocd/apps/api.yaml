@@ -6,12 +6,12 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: 'https://github.com/ThuyTrang9525/gitops.git' # Tự động nhận link Git của bạn
+    repoURL: 'https://github.com/ThuyTrang9525/gitops.git'
     targetRevision: HEAD
-    path: k8s/be # Trỏ đúng vào thư mục chứa file api.yaml vừa tạo ở Bước 1
+    path: k8s-api # Trỏ chính xác vào thư mục k8s-api chúng ta vừa tạo ở trên
   destination:
     server: 'https://kubernetes.default.svc'
-    namespace: demo # Triển khai ứng dụng vào namespace tên là demo
+    namespace: demo
   syncPolicy:
     automated:
       prune: true
