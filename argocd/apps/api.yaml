@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: backend-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/ThuyTrang9525/gitops.git' # Tự động nhận link Git của bạn
+    targetRevision: HEAD
+    path: k8s/be # Trỏ đúng vào thư mục chứa file api.yaml vừa tạo ở Bước 1
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: demo # Triển khai ứng dụng vào namespace tên là demo
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
