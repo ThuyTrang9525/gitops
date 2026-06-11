@@ -1,6 +1,5 @@
-# 1) ConfigMap chạy ở Wave 0
-kind: ConfigMap
 apiVersion: v1
+kind: ConfigMap
 metadata:
   name: web-config
   namespace: demo
@@ -9,7 +8,6 @@ metadata:
 data:
   MESSAGE: "hello from gitops"
 ---
-# 2) Deployment chạy ở Wave 1 (Đọc cấu hình từ ConfigMap qua envFrom)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -34,7 +32,6 @@ spec:
             - configMapRef:
                 name: web-config
 ---
-# 3) Service chạy ở Wave 2 (Chạy cuối cùng sau khi Pod đã lên)
 apiVersion: v1
 kind: Service
 metadata:
