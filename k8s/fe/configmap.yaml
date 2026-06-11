@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fe-config
+  namespace: demo
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html lang="vi">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Portfolio Giới Thiệu Bản Thân</title>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f7f6; margin: 0; padding: 40px; display: flex; justify-content: center; }
+            .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); max-width: 500px; width: 100%; text-align: center; }
+            .avatar { width: 120px; height: 120px; border-radius: 50%; background: #007bff; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; color: white; font-size: 40px; font-weight: bold; }
+            h1 { color: #333; margin-bottom: 5px; }
+            p.role { color: #666; font-style: italic; margin-top: 0; }
+            .badge { background: #e9ecef; color: #495057; padding: 6px 12px; border-radius: 20px; display: inline-block; margin: 4px; font-size: 14px; }
+            .status-box { margin-top: 25px; padding: 15px; border-radius: 8px; font-weight: bold; font-size: 14px; background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+            .status-box.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <div class="avatar">TT</div>
+            <h1 id="name">Đang tải tên...</h1>
+            <p class="role" id="role">Đang tải vị trí...</p>
+            
+            <h3>Kỹ năng công nghệ:</h3>
+            <div id="skills">Đang tải danh sách kỹ năng...</div>
+
+            <div id="status" class="status-box">🔄 Đang cố gắng kết nối tới hệ thống Backend...</div>
+        </div>
+
+        <script>
+            // Gọi API trực tiếp tới Service của Backend thông qua Kubernetes DNS / Port-forward
+            // Lưu ý: Khi chạy local ngoài trình duyệt máy tính, ta sẽ trỏ tới localhost:8081 (Port của BE sau khi forward)
+            fetch('http://localhost:8081/api/profile')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('name').innerText = data.name;
+                    document.getElementById('role').innerText = data.role;
+                    
+                    let skillsHtml = '';
+                    data.skills.forEach(skill => {
+                        skillsHtml += `<span class="badge">${skill}</span>`;
+                    });
+                    document.getElementById('skills').innerHTML = skillsHtml;
+                    
+                    let statusElement = document.getElementById('status');
+                    statusElement.innerText = data.status;
+                    statusElement.className = "status-box success";
+                })
+                .catch(error => {
+                    console.error('Lỗi kết nối:', error);
+                    document.getElementById('status').innerText = "❌ Không thể kết nối tới Backend. Hãy đảm bảo bạn đã chạy lệnh port-forward cho Backend!";
+                });
+        </script>
+    </body>
+    </html>
