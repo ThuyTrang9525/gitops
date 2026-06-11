@@ -1,0 +1,22 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: api
+  namespace: demo
+  labels:
+    app: api
+    release: kube-prometheus-stack # Nhãn này bắt buộc phải có để Prometheus Operator chịu quét
+spec:
+  selector:
+    matchLabels:
+      app: api # Nhãn này phải trùng với nhãn app: api của Service trong file api.yaml
+  endpoints:
+    - port: http # Tên cổng được định nghĩa trong Service của bạn
+      path: /metrics # Đường dẫn chứa metric của ứng dụng Flask
+      interval: 15s # Cứ 15 giây Prometheus sẽ vào lấy dữ liệu một lần
+
+
+      kind: ServiceMonitor       # Prometheus scrape /metrics
+spec:
+  selector: { matchLabels: { app: api } }
+  endpoints: [ { port: http, path: /metrics, interval: 15s } ]
