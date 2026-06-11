@@ -1,0 +1,89 @@
+name: Build & Push Docker Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/fe/**"
+      - "app/be/**"
+
+jobs:
+  # ── Build & push Frontend ──────────────────────────────────
+  build-fe:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push FE image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./app/fe
+          push: true
+          tags: |
+            205trang/portfolio-fe:latest
+            205trang/portfolio-fe:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Build & push Backend ───────────────────────────────────
+  build-be:
+    name: Build Backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push BE image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./app/be
+          push: true
+          tags: |
+            205trang/portfolio-be:latest
+            205trang/portfolio-be:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Update K8s image tag ───────────────────────────────────
+  update-k8s:
+    name: Update K8s Image Tag
+    runs-on: ubuntu-latest
+    needs: [build-fe, build-be]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update FE image tag
+        run: |
+          sed -i "s|205trang/portfolio-fe:.*|205trang/portfolio-fe:${{ github.sha }}|g" k8s/fe/deployment.yaml
+
+      - name: Update BE image tag
+        run: |
+          sed -i "s|205trang/portfolio-be:.*|205trang/portfolio-be:${{ github.sha }}|g" k8s/be/deployment.yaml
+
+      - name: Commit & push updated tags
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/fe/deployment.yaml k8s/be/deployment.yaml
+          git diff --staged --quiet || git commit -m "ci: update image tags to ${{ github.sha }}"
+          git push
