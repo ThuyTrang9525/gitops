@@ -6,23 +6,34 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "0"
 data:
-  # Cấu hình Nginx biến thành một Mock API Server trả về dữ liệu JSON
   api.conf: |
     server {
         listen 80;
         
-        # Hỗ trợ gọi API xuyên quốc gia (CORS) giúp FE kết nối được BE
+        # Cấu hình CORS mở rộng để cho phép cả dữ liệu POST và header Content-Type từ FE
         add_header 'Access-Control-Allow-Origin' '*' always;
         add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
         add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range' always;
 
+        # Xử lý các yêu cầu tiền kiểm tra (Preflight OPTIONS request) của phương thức POST
+        if ($request_method = 'OPTIONS') {
+            return 204;
+        }
+
+        # API 1: Trả về thông tin Profile cá nhân (GET)
         location /api/profile {
             default_type application/json;
-            return 200 '{"name": "Thùy Trang", "role": "DevOps Engineer / Fullstack Developer", "skills": ["GitOps", "ArgoCD", "Kubernetes", "AWS", "Docker"], "status": "Kết nối Backend thành công! 🚀"}';
+            return 200 '{"name": "Thùy Trang", "role": "DevOps Engineer / Cloud Specialist", "skills": ["GitOps", "ArgoCD", "Kubernetes", "Docker", "AWS Infrastructure"], "bio": "Sinh viên ngành Công nghệ thông tin đam mê tự động hóa hạ tầng và tối ưu hóa hệ thống triển khai phần mềm theo chuẩn Cloud Native."}';
+        }
+
+        # API 2: Tiếp nhận dữ liệu gửi về từ Contact Form (POST)
+        location /api/contact {
+            default_type application/json;
+            return 200 '{"status": "success", "message": "Backend đã nhận được lời nhắn của bạn! Cảm ơn bạn đã liên hệ. 📬"}';
         }
 
         location / {
             default_type text/plain;
-            return 200 'Backend đang hoạt động ổn định!';
+            return 200 'Backend API đang chạy mượt mà!';
         }
     }
