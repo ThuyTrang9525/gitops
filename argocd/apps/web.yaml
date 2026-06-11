@@ -6,7 +6,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/<ban>/gitops.git # Thay <ban> bằng username của bạn
+    repoURL: https://github.com/ThuyTrang9525/gitops.git
     path: k8s
   destination:
     server: https://kubernetes.default.svc
