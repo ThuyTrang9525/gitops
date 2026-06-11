@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: fe-config
+  name: fe-config1
   namespace: demo
   annotations:
     argocd.argoproj.io/sync-wave: "0"

@@ -27,4 +27,4 @@ spec:
       volumes:
         - name: config-volume
           configMap:
-            name: be-config
+            name: be-config1

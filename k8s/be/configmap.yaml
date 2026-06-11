@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: be-config
+  name: be-config1
   namespace: demo
   annotations:
     argocd.argoproj.io/sync-wave: "0"

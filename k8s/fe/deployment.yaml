@@ -27,4 +27,4 @@ spec:
       volumes:
         - name: html-volume
           configMap:
-            name: fe-config
+            name: fe-config1
