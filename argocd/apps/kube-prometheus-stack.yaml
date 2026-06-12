@@ -31,9 +31,9 @@ spec:
               smtp_require_tls: true
             route:
               group_by: ['alertname', 'namespace']
-              group_wait: 10s
-              group_interval: 10s
-              repeat_interval: 5m
+              group_wait: 30s       # ◄--- Tăng lên 30s: Đợi 30s để gom tất cả các alert cùng loại vào 1 mail duy nhất
+              group_interval: 5m    # ◄--- SỬA THÀNH 5m (Thay vì 10s): Nếu có alert mới cùng nhóm, phải đợi 5 phút sau mới được gửi tiếp
+              repeat_interval: 3h   # ◄--- SỬA THÀNH 3h (Thay vì 5m): Nếu lỗi cũ VẪN BỊ KẸT chưa sửa, phải 3 tiếng sau mới nhắc lại (Tránh ngập lụt mail)
               receiver: 'email-notifications'
               routes:
               - matchers:

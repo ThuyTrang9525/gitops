@@ -33,18 +33,20 @@ spec:
               port: 8080
   strategy:
     canary:
-      steps:
+      analysis: 
+        templates:
+          - templateName: success-rate-check
+        args:
+          - name: service-name
+            value: api
+      steps: 
         - setWeight: 25
-        - analysis:
-            templates:
-              - templateName: success-rate-check
-            args:
-              - name: service-name
-                value: api
+        - pause:
+            duration: 30s # Đứng ở 25% trong 30s (Vẫn liên tục check lỗi ngầm)
         - setWeight: 50
         - pause:
-            duration: 30s
-        - setWeight: 100
+            duration: 30s # Lên 50% đứng tiếp 30s (Vẫn liên tục check lỗi ngầm)
+        - setWeight: 100   # Hoàn thành 100% (Analysis tự động tắt khi kết thúc)
 ---
 apiVersion: v1
 kind: Service
