@@ -17,6 +17,33 @@ spec:
         defaultRules:
           rules:
             kubelet: false
+        
+        # =========================================================
+        # 🔥 ĐOẠN BỔ SUNG: CẤU HÌNH GMAIL CHO ALERTMANAGER TẠI ĐÂY
+        # =========================================================
+        alertmanager:
+          config:
+            global:
+              smtp_smarthost: 'smtp.gmail.com:587'
+              smtp_from: 'buithithuytrang0905@gmail.com' # <--- THAY BẰNG EMAIL GỬI CỦA BẠN
+              smtp_auth_username: 'buithithuytrang0905@gmail.com' # <--- THAY BẰNG EMAIL GỬI CỦA BẠN
+              smtp_auth_password: 'rheh lbwf mezh mnuy'
+              smtp_require_tls: true
+            route:
+              group_by: ['alertname', 'namespace']
+              group_wait: 10s
+              group_interval: 10s
+              repeat_interval: 5m
+              receiver: 'email-notifications'
+              routes:
+              - matchers:
+                - severity = critical
+                receiver: 'email-notifications'
+            receivers:
+            - name: 'email-notifications'
+              email_configs:
+              - to: 'buithithuytrang0905@gmail.com'         # <--- THAY BẰNG EMAIL CÁ NHÂN MUỐN NHẬN THƯ
+                send_resolved: true
   destination:
     server: 'https://kubernetes.default.svc'
     namespace: monitoring

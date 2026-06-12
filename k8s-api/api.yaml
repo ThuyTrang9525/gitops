@@ -35,8 +35,12 @@ spec:
     canary:
       steps:
         - setWeight: 25
-        - pause:
-            duration: 30s
+        - analysis:
+            templates:
+              - templateName: success-rate-check
+            args:
+              - name: service-name
+                value: api
         - setWeight: 50
         - pause:
             duration: 30s

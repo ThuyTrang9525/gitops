@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate-check
+  namespace: demo
+spec:
+  metrics:
+  - name: success-rate
+    interval: 10s
+    # Sửa cú pháp so sánh kết quả mảng (result[0])
+    successCondition: result[0] >= 0.95 
+    failureLimit: 3
+    provider:
+      prometheus:
+        # Sửa đường dẫn DNS chuẩn nội bộ cụm K8s
+        address: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+        # Sửa tên metric 'req' thành 'flask_http_request_total' chuẩn của bài Lab
+        query: |
+          sum(rate(flask_http_request_total{namespace="demo", status!~"5.*"}[2m])) 
+          / 
+          (sum(rate(flask_http_request_total{namespace="demo"}[2m])) or vector(1))

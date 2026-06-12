@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: api-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+  - name: api-health
+    rules:
+    - alert: ApiHighErrorRate
+      expr: sum(rate(flask_http_request_total{namespace="demo", status=~"5.*"}[1m])) > 0
+      for: 10s
+      labels:
+        severity: critical
+      annotations:
+        summary: "Ứng dụng API tại namespace demo đang bị lỗi nghiêm trọng!"
+        description: "Tỷ lệ lỗi 5xx vượt ngưỡng an toàn trong quá trình thả Canary."
