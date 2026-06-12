@@ -1,6 +1,7 @@
 # GitOps Portfolio — Tài liệu kỹ thuật toàn hệ thống
 
 > **Mục đích tài liệu:** Giải thích toàn bộ kiến trúc, luồng hoạt động, và ý nghĩa từng thông số trong mỗi file của dự án. Không thay đổi bất kỳ dòng code nào.
+> **Cập nhật lần cuối:** Phản ánh đúng cấu hình canary background analysis, AnalysisTemplate success-rate ≥ 95%, và chi tiết alert timeline.
 
 ---
 
@@ -16,9 +17,10 @@
 8. [Backend (k8s/be/)](#8-backend-k8sbe)
 9. [API Service với Argo Rollouts (k8s-api/)](#9-api-service-với-argo-rollouts-k8s-api)
 10. [Monitoring Stack — Prometheus & Alerting](#10-monitoring-stack--prometheus--alerting)
-11. [Ứng dụng Flask (app/)](#11-ứng-dụng-flask-app)
-12. [CI/CD — GitHub Actions](#12-cicd--github-actions)
-13. [Bảng tóm tắt các thông số quan trọng](#13-bảng-tóm-tắt-các-thông-số-quan-trọng)
+11. [Alert Timeline — Khi nào, bao lâu, điều gì xảy ra](#11-alert-timeline--khi-nào-bao-lâu-điều-gì-xảy-ra)
+12. [Ứng dụng Flask (app/)](#12-ứng-dụng-flask-app)
+13. [CI/CD — GitHub Actions](#13-cicd--github-actions)
+14. [Bảng tóm tắt các thông số quan trọng](#14-bảng-tóm-tắt-các-thông-số-quan-trọng)
 
 ---
 
@@ -37,13 +39,13 @@ Dự án này là một hệ thống **GitOps hoàn chỉnh** chạy trên Kuber
 │                    ArgoCD (namespace: argocd)                    │
 │                                                                  │
 │  root (App of Apps)                                             │
-│  └── argocd/apps/  ──────────────────────────────────────────── │
-│       ├── web.yaml          → deploy k8s/                       │
-│       ├── fe.yaml           → deploy k8s/fe/                    │
-│       ├── be.yaml           → deploy k8s/be/                    │
-│       ├── api.yaml          → deploy k8s-api/                   │
-│       ├── argo-rollouts.yaml → cài Argo Rollouts từ Helm        │
-│       └── kube-prometheus-stack.yaml → cài Prometheus từ Helm   │
+│  └── argocd/apps/                                               │
+│       ├── web.yaml              → deploy k8s/                   │
+│       ├── fe.yaml               → deploy k8s/fe/                │
+│       ├── be.yaml               → deploy k8s/be/                │
+│       ├── api.yaml              → deploy k8s-api/               │
+│       ├── argo-rollouts.yaml    → cài Argo Rollouts từ Helm     │
+│       └── kube-prometheus-stack.yaml → cài Prometheus từ Helm  │
 └─────────────────────────────────────────────────────────────────┘
                             │
                             ▼
@@ -51,13 +53,18 @@ Dự án này là một hệ thống **GitOps hoàn chỉnh** chạy trên Kuber
 │                   Kubernetes Cluster                             │
 │                                                                  │
 │  namespace: demo                                                 │
-│  ├── frontend Pod  (nginx:1.27 serve index.html)                │
-│  ├── backend Pod   (nginx:1.27 mock REST API)                   │
-│  ├── web Pod       (nginx:1.27 + configmap env)                 │
-│  └── api Pod       (Flask app — Argo Rollouts Canary)           │
+│  ├── frontend Pod  (nginx:1.27 — serve index.html)              │
+│  ├── backend Pod   (nginx:1.27 — mock REST API)                 │
+│  ├── web Pod       (nginx:1.27 — configmap env demo)            │
+│  └── api Rollout   (Flask — Argo Rollouts Canary + Analysis)    │
 │                                                                  │
 │  namespace: monitoring                                           │
-│  └── kube-prometheus-stack (Prometheus + Grafana + Alertmanager)│
+│  └── kube-prometheus-stack                                      │
+│      ├── Prometheus Server                                      │
+│      ├── Prometheus Operator                                    │
+│      ├── Alertmanager                                           │
+│      ├── Grafana                                                │
+│      └── node-exporter / kube-state-metrics                    │
 │                                                                  │
 │  namespace: argo-rollouts                                        │
 │  └── Argo Rollouts Controller                                   │
@@ -68,13 +75,14 @@ Dự án này là một hệ thống **GitOps hoàn chỉnh** chạy trên Kuber
 
 | Công nghệ | Vai trò |
 |---|---|
-| ArgoCD | GitOps controller — đồng bộ Git → K8s |
-| Argo Rollouts | Triển khai Canary với phân tích tự động |
-| Prometheus | Thu thập metrics từ ứng dụng |
-| Prometheus Operator | Quản lý cấu hình Prometheus qua CRD |
-| Flask + prometheus-flask-exporter | Ứng dụng API sinh metrics |
+| ArgoCD | GitOps controller — đồng bộ Git → K8s tự động |
+| Argo Rollouts | Triển khai Canary với background analysis tự động |
+| Prometheus | Thu thập và lưu trữ metrics từ ứng dụng |
+| Prometheus Operator | Quản lý cấu hình Prometheus qua CRD (ServiceMonitor, PrometheusRule) |
+| Alertmanager | Nhận alert từ Prometheus, route đến Slack/email |
+| Flask + prometheus-flask-exporter | Ứng dụng API sinh metrics tự động |
 | nginx | Web server cho FE và mock API cho BE |
-| GitHub Actions | Validate manifest khi có Pull Request |
+| GitHub Actions | Validate K8s manifest schema khi có Pull Request |
 
 ---
 
@@ -88,8 +96,8 @@ gitops/
 │       └── validate.yml          # CI: validate K8s manifest khi PR
 │
 ├── app/
-│   ├── app.py                    # Flask API application
-│   └── Dockerfile                # Build image cho Flask app
+│   ├── app.py                    # Flask API — expose /metrics, inject lỗi
+│   └── Dockerfile                # Build image w9-api
 │
 ├── argocd/
 │   ├── root.yaml                 # App gốc — quản lý toàn bộ argocd/apps/
@@ -98,26 +106,26 @@ gitops/
 │       ├── fe.yaml               # ArgoCD App → k8s/fe/
 │       ├── be.yaml               # ArgoCD App → k8s/be/
 │       ├── api.yaml              # ArgoCD App → k8s-api/
-│       ├── argo-rollouts.yaml    # ArgoCD App → cài Argo Rollouts (Helm)
-│       └── kube-prometheus-stack.yaml  # ArgoCD App → cài Prometheus (Helm)
+│       ├── argo-rollouts.yaml    # Helm chart: Argo Rollouts v2.41.0
+│       └── kube-prometheus-stack.yaml  # Helm chart: kube-prometheus-stack v58.2.2
 │
 ├── k8s/
-│   ├── namespace.yaml            # Tạo namespace demo
-│   ├── web.yaml                  # Demo app (ConfigMap + Deployment + Service)
+│   ├── namespace.yaml            # Tạo namespace demo (wave -1)
+│   ├── web.yaml                  # Demo app: ConfigMap + Deployment + Service
 │   ├── fe/
-│   │   ├── configmap.yaml        # HTML của trang Portfolio
-│   │   ├── deployment.yaml       # Deploy nginx serve HTML
-│   │   └── service.yaml          # Expose frontend-service:80
+│   │   ├── configmap.yaml        # HTML Portfolio (wave 0)
+│   │   ├── deployment.yaml       # nginx serve HTML (wave 1)
+│   │   └── service.yaml          # frontend-service:80 (wave 2)
 │   └── be/
-│       ├── configmap.yaml        # nginx config mock REST API
-│       ├── deployment.yaml       # Deploy nginx mock API
-│       └── service.yaml          # Expose backend-service:80
+│       ├── configmap.yaml        # nginx mock REST API config (wave 0)
+│       ├── deployment.yaml       # nginx mock API server (wave 1)
+│       └── service.yaml          # backend-service:80 (wave 2)
 │
 └── k8s-api/
-    ├── api.yaml                  # Argo Rollouts Canary + Service
-    ├── analysis.yaml             # AnalysisTemplate — query Prometheus
-    ├── servicemonitor.yaml       # Cho Prometheus scrape /metrics
-    └── alerts.yaml               # PrometheusRule — cảnh báo lỗi 5xx
+    ├── api.yaml                  # Argo Rollouts Canary + Service ClusterIP
+    ├── analysis.yaml             # AnalysisTemplate — success rate ≥ 95%
+    ├── servicemonitor.yaml       # Hướng dẫn Prometheus scrape /metrics
+    └── alerts.yaml               # PrometheusRule — alert khi có lỗi 5xx
 ```
 
 ---
@@ -127,101 +135,209 @@ gitops/
 ### 3.1 Luồng GitOps (thay đổi config)
 
 ```
-Developer sửa file YAML
+Developer sửa file YAML trên máy local
         │
         ▼
-git commit + git push → GitHub
+git add + git commit + git push → GitHub (branch main)
+        │
+        ├─── Nếu push qua Pull Request:
+        │         GitHub Actions chạy validate.yml
+        │         └── kubeconform -strict kiểm tra schema k8s/
+        │         └── Nếu lỗi → CI fail, block merge
+        │
+        ▼ (code trên main)
+ArgoCD polling GitHub mỗi ~3 phút
+  └── So sánh Git state vs Cluster state
+  └── Phát hiện diff
         │
         ▼
-GitHub Actions chạy validate.yml
-  └── kubeconform kiểm tra schema K8s
-  └── Nếu lỗi → block merge
-        │
-        ▼ (PR được merge vào main)
-ArgoCD polling GitHub mỗi 3 phút
-  └── Phát hiện diff giữa Git và cluster
+ArgoCD tự động sync (automated: true)
+  └── Apply các resource theo đúng thứ tự sync-wave
+  └── Đợi từng wave healthy trước khi sang wave tiếp theo
         │
         ▼
-ArgoCD sync tự động (automated: true)
-  └── Apply các resource thay đổi theo đúng sync-wave
-        │
-        ▼
-Cluster được cập nhật, trạng thái = Synced/Healthy
+Cluster state = Git state → Trạng thái: Synced / Healthy
 ```
 
-### 3.2 Luồng Canary Deployment (khi cập nhật image API)
+---
+
+### 3.2 Luồng Canary Deployment với Background Analysis
+
+Đây là luồng quan trọng nhất — phản ánh đúng cấu hình hiện tại trong `api.yaml`.
 
 ```
-Cập nhật image trong k8s-api/api.yaml
+Developer đổi image trong k8s-api/api.yaml, git push
         │
         ▼
-ArgoCD sync → Argo Rollouts nhận Rollout mới
+ArgoCD sync → Argo Rollouts Controller nhận Rollout spec mới
         │
         ▼
-Bước 1: setWeight: 25
-  └── 25% traffic → Pod mới (v2), 75% → Pod cũ (v1)
+Argo Rollouts bắt đầu Canary, khởi động Analysis ngầm (background)
+Analysis chạy SONG SONG với tất cả steps bên dưới:
+  └── Query Prometheus mỗi 10 giây
+  └── Kiểm tra: success_rate = request_không_lỗi / total_request ≥ 95%?
+  └── failureLimit = 3: cho phép tối đa 3 lần check fail trước khi rollback
         │
         ▼
-Bước 2: analysis (AnalysisTemplate: success-rate-check)
-  └── Prometheus query: tỷ lệ lỗi 5xx trong 10 giây
-  └── Nếu có lỗi → failureLimit = 1 → Rollback tự động
-  └── Nếu OK → tiếp tục
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1 — setWeight: 25                  [t = 0s]
+  └── 1 trong 4 Pod chạy version mới (canary)
+  └── 25% traffic → canary, 75% → stable
         │
         ▼
-Bước 3: setWeight: 50
-  └── 50% traffic → Pod mới
+STEP 2 — pause: 30s                     [t = 0s → 30s]
+  └── Giữ nguyên 25%, chờ 30 giây
+  └── Analysis vẫn chạy ngầm kiểm tra health
+  └── Nếu Analysis fail trong 30s → ROLLBACK ngay
         │
         ▼
-Bước 4: pause 30s
-  └── Chờ 30 giây quan sát
+STEP 3 — setWeight: 50                  [t = 30s]
+  └── 2 trong 4 Pod chạy version mới
+  └── 50% traffic → canary, 50% → stable
         │
         ▼
-Bước 5: setWeight: 100
-  └── 100% traffic → Pod mới
-  └── Canary hoàn thành
+STEP 4 — pause: 30s                     [t = 30s → 60s]
+  └── Giữ nguyên 50%, chờ thêm 30 giây
+  └── Analysis vẫn chạy ngầm kiểm tra health
+  └── Nếu Analysis fail → ROLLBACK ngay
+        │
+        ▼
+STEP 5 — setWeight: 100                 [t = 60s]
+  └── 100% traffic → version mới
+  └── Analysis tự động dừng khi Rollout hoàn thành
+        │
+        ▼
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Canary hoàn thành — stable = version mới
 ```
 
-### 3.3 Luồng request từ trình duyệt
+**Điểm khác biệt quan trọng với docs cũ:**
+- Analysis KHÔNG phải là một bước tuần tự giữa các steps
+- Analysis chạy **song song ngầm (background)** từ lúc bắt đầu đến lúc kết thúc canary
+- Bất kỳ lúc nào analysis fail quá `failureLimit` → rollback, không chờ hết steps
+
+---
+
+### 3.3 Luồng Rollback tự động khi Analysis fail
 
 ```
-Browser → http://localhost:8080 (port-forward frontend-service)
+Analysis đang chạy ngầm, query mỗi 10 giây
         │
         ▼
-nginx (frontend Pod) serve index.html
+Một lần query trả về success_rate < 0.95 → count failure = 1
+        │
+        ▼ (10 giây sau)
+Query lần 2 trả về success_rate < 0.95 → count failure = 2
+        │
+        ▼ (10 giây sau)
+Query lần 3 trả về success_rate < 0.95 → count failure = 3
+  └── failureLimit = 3 đã đạt → Analysis = FAILED
         │
         ▼
-JavaScript trong trang gọi http://localhost:8081/api/profile (port-forward backend-service)
+Argo Rollouts tự động:
+  ├── Đặt Rollout status = Degraded
+  ├── Scale down tất cả canary Pod
+  ├── Chuyển 100% traffic về stable (version cũ)
+  └── Ghi event: "AnalysisRun failed, rolling back"
         │
         ▼
-nginx (backend Pod) đọc api.conf từ ConfigMap
-  └── GET /api/profile → trả JSON thông tin cá nhân
-  └── POST /api/contact → trả JSON xác nhận gửi thành công
-        │
-        ▼
-Trang Portfolio hiển thị tên, role, bio, skills
+Tổng thời gian từ lỗi đầu tiên đến rollback hoàn tất:
+  ≈ 10s × 3 lần = 30 giây (trong điều kiện lý tưởng)
+  + thời gian Prometheus scrape metrics (scrape interval: 15s)
+  → Thực tế: rollback trong khoảng 30–60 giây sau khi lỗi xuất hiện
 ```
 
-### 3.4 Luồng Monitoring
+---
+
+### 3.4 Luồng Contact Form (FE → BE)
 
 ```
-Flask API (api Pod) expose /metrics (prometheus-flask-exporter)
+User điền form: Họ tên + Email + Lời nhắn
         │
         ▼
-ServiceMonitor (servicemonitor.yaml)
-  └── Khai báo: "Hãy scrape /metrics của Service có label app: api mỗi 15s"
+JavaScript: fetch POST http://localhost:8081/api/contact
+  Body: { name, email, message } (JSON)
+  Headers: { Content-Type: application/json }
         │
         ▼
-Prometheus Operator đọc ServiceMonitor → cấu hình Prometheus tự động
+Browser tự gửi OPTIONS preflight (do cross-origin)
+  └── BE nginx trả 204 No Content (CORS OK)
         │
         ▼
-Prometheus thu thập metric: flask_http_request_total
+Browser gửi POST thật sự
         │
-        ├──▶ PrometheusRule (alerts.yaml)
-        │       └── Alert: nếu 5xx > 0 trong 10s → gửi cảnh báo critical
+        ▼
+nginx (backend Pod) nhận request tại location /api/contact
+  └── Trả ngay: 200 { status: "success", message: "Backend đã nhận được..." }
+  └── (Mock — không thật sự lưu hay gửi email)
         │
-        └──▶ AnalysisTemplate (analysis.yaml)
-                └── Argo Rollouts query mỗi 10s trong lúc Canary
-                └── Nếu 5xx > 0 → Rollback ngay
+        ▼
+JavaScript nhận response:
+  ├── Hiển thị status-box màu xanh lá với message từ BE
+  └── Reset form (xóa sạch các trường)
+```
+
+> **Lưu ý:** Backend hiện tại là **mock nginx** — chỉ trả JSON tĩnh, không lưu database, không gửi email. Đây là thiết kế phù hợp cho mục đích demo FE↔BE communication trong Kubernetes.
+
+---
+
+### 3.5 Luồng request GET Profile (FE → BE)
+
+```
+Trang load xong → JavaScript tự động gọi ngay
+        │
+        ▼
+fetch GET http://localhost:8081/api/profile
+        │
+        ▼
+nginx (backend Pod) tại location /api/profile
+  └── Trả JSON hardcoded: { name, role, skills[], bio }
+        │
+        ▼
+JavaScript render lên DOM:
+  ├── document.getElementById('name').innerText = data.name
+  ├── document.getElementById('role').innerText = data.role
+  ├── document.getElementById('bio').innerText = data.bio
+  └── skills → render từng <span class="badge">
+        │
+        ▼
+Nếu fetch thất bại (BE chưa port-forward):
+  └── Hiển thị thông báo lỗi màu đỏ trong #bio
+```
+
+---
+
+### 3.6 Luồng Monitoring (Prometheus scrape → Alert)
+
+```
+Flask API Pod đang chạy, nhận request
+        │
+        ▼
+prometheus-flask-exporter tự động đếm:
+  flask_http_request_total{status="200"} += 1  (request thành công)
+  flask_http_request_total{status="500"} += 1  (request lỗi)
+        │
+        ▼
+Prometheus scrape GET http://api:8080/metrics  [mỗi 15 giây]
+  └── ServiceMonitor hướng dẫn: port=http, path=/metrics, interval=15s
+        │
+        ▼
+Prometheus lưu time-series data
+        │
+        ├─────────────────────────────────────────────────────────┐
+        │                                                         │
+        ▼                                                         ▼
+PrometheusRule evaluate [mỗi ~30s]              AnalysisTemplate query [mỗi 10s]
+  expr: sum(rate(5xx[1m])) > 0                    query: success_rate [2m]
+  for: 10s liên tục                               successCondition: ≥ 0.95
+        │                                                         │
+        ▼                                                         ▼
+Alert PENDING (chờ 10s)                         fail count tăng dần
+        │                                         (failureLimit = 3)
+        ▼                                                         │
+Alert FIRING → Alertmanager                       ▼
+  └── Route theo severity: critical          Rollback tự động
+  └── Gửi notification (Slack/email)
 ```
 
 ---
@@ -231,54 +347,46 @@ Prometheus thu thập metric: flask_http_request_total
 ### `argocd/root.yaml`
 
 ```yaml
-apiVersion: argoproj.io/v1alpha1   # API của ArgoCD
-kind: Application                   # Loại resource: một Application ArgoCD
+apiVersion: argoproj.io/v1alpha1
+kind: Application
 metadata:
-  name: root                        # Tên app này trên ArgoCD UI
-  namespace: argocd                 # PHẢI nằm trong namespace argocd
+  name: root
+  namespace: argocd          # Application object PHẢI nằm trong namespace argocd
 spec:
-  project: default                  # Project ArgoCD (mặc định là default)
+  project: default           # Project ArgoCD — phân quyền và giới hạn resource
   source:
     repoURL: https://github.com/ThuyTrang9525/gitops.git
-    # URL của Git repo chứa toàn bộ manifest
-    path: argocd/apps
-    # Thư mục trong repo — root app chỉ nhìn vào argocd/apps/
-    # → Mọi file .yaml trong đó được coi là ArgoCD Application
+    path: argocd/apps        # Root app chỉ nhìn vào thư mục này
+                             # → Mọi file .yaml trong đó = một ArgoCD Application
   destination:
-    server: https://kubernetes.default.svc
-    # Kubernetes API server — "kubernetes.default.svc" = cluster hiện tại
-    namespace: argocd
-    # Namespace đích để tạo các Application object
+    server: https://kubernetes.default.svc   # Cluster hiện tại
+    namespace: argocd        # Tạo Application object trong namespace argocd
   syncPolicy:
     automated:
-      prune: true
-      # Nếu file bị xóa khỏi Git → xóa resource tương ứng trên cluster
-      selfHeal: true
-      # Nếu ai đó sửa trực tiếp trên cluster → ArgoCD tự phục hồi về trạng thái Git
+      prune: true            # File xóa khỏi Git → resource xóa trên cluster
+      selfHeal: true         # Cluster bị chỉnh tay → ArgoCD tự phục hồi về Git
 ```
 
-**Tại sao dùng App of Apps?** Root app quản lý toàn bộ các Application con. Chỉ cần `kubectl apply -f argocd/root.yaml` một lần duy nhất, sau đó mọi thứ tự động. Thêm app mới chỉ cần tạo thêm file trong `argocd/apps/`.
+**Tại sao dùng App of Apps?** Chỉ cần `kubectl apply -f argocd/root.yaml` một lần. Sau đó mọi Application con trong `argocd/apps/` được tạo và quản lý tự động. Thêm app mới = thêm 1 file YAML vào `argocd/apps/`.
 
 ---
 
-### `argocd/apps/fe.yaml`
+### `argocd/apps/fe.yaml` / `be.yaml` / `web.yaml` / `api.yaml`
 
 ```yaml
 metadata:
-  name: frontend-app     # Tên hiển thị trên ArgoCD dashboard
-  namespace: argocd      # Application object luôn nằm trong namespace argocd
+  name: frontend-app         # Tên hiển thị trên ArgoCD dashboard
+  namespace: argocd
 spec:
   source:
-    path: k8s/fe         # Trỏ vào thư mục chứa manifest của frontend
+    path: k8s/fe             # Thư mục chứa manifest — ArgoCD apply toàn bộ file trong đó
   destination:
-    namespace: demo      # Deploy các resource vào namespace demo
+    namespace: demo          # Namespace đích trên cluster
   syncPolicy:
     automated:
-      prune: true        # Xóa resource cũ nếu bị xóa khỏi Git
-      selfHeal: true     # Tự phục hồi nếu cluster bị chỉnh tay
+      prune: true
+      selfHeal: true
 ```
-
-Tương tự cho `be.yaml` (path: k8s/be), `web.yaml` (path: k8s), `api.yaml` (path: k8s-api).
 
 ---
 
@@ -287,34 +395,26 @@ Tương tự cho `be.yaml` (path: k8s/be), `web.yaml` (path: k8s), `api.yaml` (p
 ```yaml
 spec:
   source:
-    repoURL: 'https://argoproj.github.io/argo-helm'
-    # Đây KHÔNG phải Git repo thông thường — đây là Helm Chart repository
+    repoURL: 'https://argoproj.github.io/argo-helm'  # Helm repository, không phải Git
     chart: argo-rollouts
-    # Tên chart trong Helm repo
-    targetRevision: 2.41.0
-    # Phiên bản cụ thể của chart — ghim version để tránh tự động upgrade
+    targetRevision: 2.41.0   # Ghim version — tránh tự động upgrade khi chart mới ra
     helm:
       values: |
         prometheus:
           prometheusSpec:
             serviceMonitorSelectorNilUsesHelmValues: false
-            # Khi = false: Prometheus sẽ scrape TẤT CẢ ServiceMonitor trong cluster
-            # (không chỉ những cái được tạo bởi Helm chart này)
-            # Cần thiết để ServiceMonitor của app api hoạt động
+            # false = Prometheus scrape TẤT CẢ ServiceMonitor trong cluster
+            # (không chỉ những cái thuộc Helm release này)
+            # Bắt buộc để servicemonitor.yaml của app api được nhận diện
         defaultRules:
           rules:
-            kubelet: false
-            # Tắt alerting rule mặc định cho kubelet để giảm nhiễu cảnh báo
+            kubelet: false   # Tắt alert kubelet mặc định — giảm noise
   destination:
     namespace: argo-rollouts
-    # Cài Argo Rollouts vào namespace riêng
   syncPolicy:
     syncOptions:
-      - CreateNamespace=true
-      # Tự tạo namespace argo-rollouts nếu chưa có
-      - ServerSideApply=true
-      # Dùng Server-Side Apply thay vì Client-Side Apply
-      # Cần thiết với Helm chart lớn để tránh lỗi "annotation too long"
+      - CreateNamespace=true   # Tự tạo namespace nếu chưa có
+      - ServerSideApply=true   # Dùng SSA thay CSA — tránh lỗi "annotation too long" với Helm chart lớn
 ```
 
 ---
@@ -326,25 +426,23 @@ spec:
   source:
     repoURL: 'https://prometheus-community.github.io/helm-charts'
     chart: kube-prometheus-stack
-    targetRevision: 58.2.2
-    # Chart này bao gồm: Prometheus, Grafana, Alertmanager, node-exporter,
-    # kube-state-metrics, Prometheus Operator — tất cả trong một lần cài
+    targetRevision: 58.2.2   # Bao gồm: Prometheus, Grafana, Alertmanager,
+                              # Prometheus Operator, node-exporter, kube-state-metrics
     helm:
       values: |
         prometheus:
           prometheusSpec:
             serviceMonitorSelectorNilUsesHelmValues: false
-            # QUAN TRỌNG: Cho phép Prometheus tự động nhận diện ServiceMonitor
-            # từ bất kỳ namespace nào, không chỉ namespace monitoring
+            # QUAN TRỌNG: Cho phép Prometheus nhận diện ServiceMonitor
+            # từ bất kỳ namespace nào (kể cả namespace demo)
         defaultRules:
           rules:
             kubelet: false
   destination:
-    namespace: monitoring  # Stack monitoring nằm tách biệt, không lẫn với app
+    namespace: monitoring    # Tách biệt hoàn toàn với app namespace
   syncPolicy:
     syncOptions:
-      - ServerSideApply=true
-      # Bắt buộc với kube-prometheus-stack vì chart có CRD rất lớn
+      - ServerSideApply=true # Bắt buộc — chart có CRD rất lớn, CSA sẽ bị lỗi
 ```
 
 ---
@@ -358,76 +456,68 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: demo
-  # Tên namespace — toàn bộ ứng dụng (fe, be, web, api) đều chạy trong đây
   annotations:
     argocd.argoproj.io/sync-wave: "-1"
-    # Wave -1: Namespace được tạo TRƯỚC TẤT CẢ các resource khác
-    # Nếu không tạo namespace trước, các Deployment sẽ bị lỗi "namespace not found"
+    # Wave -1: Tạo TRƯỚC TẤT CẢ resource khác
+    # Nếu thiếu → Deployment, Service bị lỗi "namespace not found"
 ```
 
-**Sync Wave** là cơ chế của ArgoCD để kiểm soát thứ tự deploy:
+**Sync Wave — thứ tự tạo resource trong ArgoCD:**
 
-| Wave | Resource | Lý do |
-|------|----------|-------|
-| -1 | Namespace | Phải tồn tại trước tất cả |
-| 0 | ConfigMap | Config phải có trước Pod đọc nó |
-| 1 | Deployment | Tạo Pod sau khi có config |
-| 2 | Service | Expose sau khi Pod đã Running |
+ArgoCD đợi tất cả resource ở wave N đạt **Healthy** trước khi bắt đầu wave N+1.
 
-ArgoCD đợi tất cả resource ở wave N đạt trạng thái healthy trước khi chuyển sang wave N+1.
+| Wave | Resource được tạo | Lý do thứ tự |
+|------|-------------------|--------------|
+| -1 | Namespace `demo` | Container cho tất cả resource |
+| 0 | ConfigMap fe-config1, be-config1, web-config | Config phải có trước Pod cần đọc nó |
+| 1 | Deployment frontend, backend, web | Pod sau khi có config |
+| 2 | Service frontend-service, backend-service, web | Expose sau khi Pod Running |
 
 ---
 
 ## 6. Ứng dụng Web (`k8s/web.yaml`)
 
-File này định nghĩa 3 resource trong một file duy nhất, phân cách bằng `---`.
+File gộp 3 resource trong một file, phân cách bằng `---`.
 
-### ConfigMap `web-config` (wave 0)
+### ConfigMap `web-config` — wave 0
 
 ```yaml
 data:
   MESSAGE: "hello from gitops"
-  # Biến môi trường được inject vào container qua envFrom
-  # Mục đích: demo cách truyền config vào Pod không hardcode trong image
+  # Biến môi trường inject vào container qua envFrom
+  # Demo kỹ thuật: truyền config vào Pod qua ConfigMap thay vì hardcode
 ```
 
-### Deployment `web` (wave 1)
+### Deployment `web` — wave 1
 
 ```yaml
 spec:
-  replicas: 2
-  # Chạy 2 Pod — đảm bảo high availability, nếu 1 Pod chết vẫn còn 1 Pod phục vụ
+  replicas: 2              # 2 Pod — high availability cơ bản
   selector:
     matchLabels:
-      app: web
-  # Selector dùng để Deployment biết nó quản lý Pod nào
-  # PHẢI khớp với labels trong template.metadata.labels
+      app: web             # Deployment quản lý Pod có label này
   template:
     spec:
       containers:
-        - image: nginx:1.27
-          # Dùng image nginx version cụ thể (1.27) thay vì latest
-          # Tránh tình trạng image thay đổi ngoài ý muốn
+        - image: nginx:1.27  # Version cụ thể, không dùng latest
           envFrom:
             - configMapRef:
                 name: web-config
-          # Inject TOÀN BỘ key-value trong ConfigMap thành biến môi trường
-          # Container sẽ có biến môi trường MESSAGE="hello from gitops"
+                # Inject TOÀN BỘ key=value trong ConfigMap thành env vars
+                # Pod sẽ có: env MESSAGE="hello from gitops"
 ```
 
-### Service `web` (wave 2)
+### Service `web` — wave 2
 
 ```yaml
 spec:
   selector:
-    app: web
-  # Service tìm Pod có label app: web để forward traffic đến
+    app: web             # Forward traffic đến Pod có label này
   ports:
-    - port: 80        # Port mà Service lắng nghe (bên ngoài Pod)
-      targetPort: 80  # Port trong container nginx đang lắng nghe
+    - port: 80           # Port Service lắng nghe
+      targetPort: 80     # Port container nginx
+  # type mặc định = ClusterIP — chỉ accessible trong cluster
 ```
-
-**Loại Service mặc định là ClusterIP** — chỉ accessible trong cluster, không expose ra ngoài. Để truy cập từ máy local cần `kubectl port-forward`.
 
 ---
 
@@ -437,65 +527,61 @@ spec:
 
 ```yaml
 metadata:
-  name: fe-config1
-  # Tên ConfigMap — deployment.yaml phải tham chiếu đúng tên này
+  name: fe-config1             # deployment.yaml phải tham chiếu đúng tên này
   annotations:
-    argocd.argoproj.io/sync-wave: "0"  # Tạo trước Deployment
+    argocd.argoproj.io/sync-wave: "0"
 data:
-  index.html: |
-    # Key "index.html" là tên file
-    # Value là toàn bộ nội dung HTML của trang Portfolio
-    # Kỹ thuật này dùng ConfigMap như một "file server" đơn giản
+  index.html: |                # Key = tên file, Value = toàn bộ nội dung HTML
 ```
 
-**Nội dung trang HTML bao gồm:**
-- **Profile card**: Hiển thị avatar (chữ "TT"), tên, role, bio, danh sách skills — tất cả lấy từ Backend API
-- **Contact form**: Form gửi lời nhắn với 3 trường (tên, email, message) — POST đến Backend
-- **JavaScript fetch**: Gọi `http://localhost:8081/api/profile` (GET) và `http://localhost:8081/api/contact` (POST)
+**Nội dung trang HTML:**
+- **Profile card**: Avatar chữ "TT", tên/role/bio/skills — fetch từ BE `GET /api/profile`
+- **Contact form**: 3 trường (tên, email, message) — submit `POST /api/contact`
+- **Kết nối BE**: `const beBaseUrl = 'http://localhost:8081'` — dùng với port-forward
 
-> **Lưu ý quan trọng**: URL `localhost:8081` trong JavaScript nghĩa là trang này được thiết kế để dùng với `kubectl port-forward svc/backend-service 8081:80`. Trong môi trường production cần đổi thành DNS nội bộ.
+**Trạng thái UI:**
+- `status-loading` (xám): đang chờ response
+- `status-success` (xanh lá): BE trả thành công
+- `status-error` (đỏ): fetch thất bại hoặc BE lỗi
 
 ### `k8s/fe/deployment.yaml`
 
 ```yaml
 spec:
-  replicas: 1         # 1 Pod — demo đơn giản, chưa cần HA
+  replicas: 1
   template:
     metadata:
       annotations:
         checksum/config: "v1"
-        # Annotation thủ công dùng để force restart Pod khi ConfigMap thay đổi
+        # Trick force Pod restart khi ConfigMap thay đổi
         # K8s không tự restart Pod khi ConfigMap thay đổi
-        # Khi muốn reload: đổi "v1" → "v2" → commit → ArgoCD sync → Pod mới được tạo
+        # Cách dùng: đổi "v1" → "v2" → git commit → ArgoCD sync → Pod mới
     spec:
       containers:
         - image: nginx:1.27
           volumeMounts:
-            - name: html-volume
-              mountPath: /usr/share/nginx/html/index.html
-              # Mount file index.html vào đúng vị trí nginx serve file tĩnh
+            - mountPath: /usr/share/nginx/html/index.html
               subPath: index.html
-              # subPath: CHỈ mount key "index.html" từ ConfigMap
-              # Không dùng subPath → toàn bộ ConfigMap được mount thành thư mục
+              # subPath = chỉ mount đúng 1 key "index.html" từ ConfigMap
+              # Không có subPath = mount cả ConfigMap thành thư mục
       volumes:
         - name: html-volume
           configMap:
             name: fe-config1
-            # Lấy data từ ConfigMap tên fe-config1
 ```
 
 ### `k8s/fe/service.yaml`
 
 ```yaml
 metadata:
-  name: frontend-service   # Tên để port-forward: kubectl port-forward svc/frontend-service 8080:80
+  name: frontend-service   # kubectl port-forward svc/frontend-service 8080:80 -n demo
 spec:
   selector:
-    app: frontend          # Tìm Pod có label app: frontend
+    app: frontend
   ports:
-    - port: 80             # Service port
-      targetPort: 80       # Container port nginx
-# Type mặc định = ClusterIP (không expose ra ngoài cluster)
+    - port: 80
+      targetPort: 80
+  # ClusterIP — không expose ra ngoài cluster
 ```
 
 ---
@@ -509,41 +595,37 @@ metadata:
   name: be-config1
 
 data:
-  api.conf: |
-    # Key "api.conf" — sẽ được mount thành file nginx config
+  api.conf: |              # Mount thành file nginx config
     server {
         listen 80;
 
-        # CORS Headers — cho phép FE từ origin khác gọi API
+        # CORS — cho phép browser từ origin khác gọi API
         add_header 'Access-Control-Allow-Origin' '*' always;
-        # '*' = chấp nhận mọi origin (phù hợp dev, production nên giới hạn domain)
+        # '*' = mọi origin — phù hợp dev, production nên giới hạn domain cụ thể
         add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
         add_header 'Access-Control-Allow-Headers' '...' always;
-        # Liệt kê headers mà browser được phép gửi trong cross-origin request
 
         if ($request_method = 'OPTIONS') {
             return 204;
-            # Xử lý Preflight request: browser tự động gửi OPTIONS trước POST
-            # 204 = No Content, không có body — đây là response đúng chuẩn cho preflight
+            # Preflight: browser gửi OPTIONS trước POST cross-origin
+            # 204 No Content = response đúng chuẩn, không cần body
         }
 
         location /api/profile {
             default_type application/json;
-            # Khai báo Content-Type của response là JSON
-            return 200 '{...json...}';
-            # Mock API: nginx trả thẳng JSON hardcoded, không cần server thật
-            # Kỹ thuật này đủ để demo FE↔BE communication mà không cần code backend
+            return 200 '{...JSON hardcoded...}';
+            # Mock API — không cần server thật, đủ để demo FE↔BE
         }
 
         location /api/contact {
             default_type application/json;
             return 200 '{"status": "success", "message": "..."}';
-            # Giả lập "nhận form thành công" — không lưu dữ liệu thật
+            # Giả lập nhận form — không lưu data, không gửi email
         }
 
         location / {
             return 200 'Backend API đang chạy mượt mà!';
-            # Catchall — bất kỳ path nào không match đều trả thông báo này
+            # Health check thủ công — bất kỳ path nào không match
         }
     }
 ```
@@ -556,23 +638,17 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/config: "v1"
-        # Cùng kỹ thuật với FE — đổi giá trị để force Pod restart
+        checksum/config: "v1"   # Force restart khi đổi giá trị này
     spec:
       containers:
         - image: nginx:1.27
-          ports:
-            - containerPort: 80
           volumeMounts:
-            - name: config-volume
-              mountPath: /etc/nginx/conf.d/default.conf
-              # Mount đè lên file config mặc định của nginx
-              # nginx tự động đọc tất cả file .conf trong /etc/nginx/conf.d/
+            - mountPath: /etc/nginx/conf.d/default.conf
+              # Đè lên nginx config mặc định
               subPath: api.conf
               # Chỉ lấy key "api.conf" từ ConfigMap
       volumes:
-        - name: config-volume
-          configMap:
+        - configMap:
             name: be-config1
 ```
 
@@ -581,90 +657,86 @@ spec:
 ```yaml
 metadata:
   name: backend-service
-  # FE JavaScript gọi localhost:8081 sau khi port-forward service này:
-  # kubectl port-forward svc/backend-service 8081:80 -n demo
+  # Port-forward: kubectl port-forward svc/backend-service 8081:80 -n demo
 spec:
   selector:
     app: backend
   ports:
-    - port: 80        # Service port
-      targetPort: 80  # Container port nginx
+    - port: 80
+      targetPort: 80
 ```
 
 ---
 
 ## 9. API Service với Argo Rollouts (`k8s-api/`)
 
-### `k8s-api/api.yaml` — Rollout (Canary)
+### `k8s-api/api.yaml` — Rollout + Service
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
-kind: Rollout
-# Thay thế cho Deployment thông thường — được quản lý bởi Argo Rollouts controller
-metadata:
-  name: api
-  namespace: demo
+kind: Rollout              # Thay thế Deployment — quản lý bởi Argo Rollouts controller
 
 spec:
-  replicas: 4
-  # Tổng số Pod (cả stable + canary) trong quá trình deploy
-  selector:
-    matchLabels:
-      app: api
+  replicas: 4              # Tổng 4 Pod (stable + canary) trong suốt quá trình deploy
+
   template:
     spec:
       containers:
         - name: api
           image: w9-api:1
-          # Image Flask app build từ app/Dockerfile
-          # "w9-api:1" là tên image local (imagePullPolicy: IfNotPresent)
           imagePullPolicy: IfNotPresent
-          # Không pull từ registry nếu image đã có sẵn trên node
-          # Phù hợp cho môi trường dev/lab không có registry
+          # Không pull từ registry — image phải có sẵn trên node
+          # Phù hợp lab/dev, không có registry riêng
           ports:
             - name: http
               containerPort: 8080
-              # Đặt tên "http" — ServiceMonitor sẽ tham chiếu tên này
+              # Tên "http" — ServiceMonitor và Service đều tham chiếu tên này
+
           env:
             - name: ERROR_RATE
               value: "0"
-              # Tỷ lệ lỗi giả lập (0 = không lỗi, 0.5 = 50% request lỗi 500)
-              # Đổi giá trị này để test canary rollback
+              # 0   = không lỗi (bình thường)
+              # 0.3 = 30% request trả 500 (test rollback)
+              # 1.0 = 100% request lỗi (rollback ngay)
+
             - name: VERSION
               value: "v2"
-              # Phiên bản app — trả về trong JSON response để phân biệt stable/canary
+              # Hiển thị trong JSON response → phân biệt Pod stable vs canary
+
           readinessProbe:
             httpGet:
               path: /healthz
               port: 8080
-            # Kubernetes kiểm tra /healthz trước khi đưa Pod vào rotation nhận traffic
-            # Nếu probe fail → Pod không nhận traffic → tránh downtime
+            # K8s kiểm tra trước khi đưa Pod vào Service selector
+            # /healthz luôn trả 200 dù ERROR_RATE cao
+            # → Pod vẫn nhận traffic (lỗi là cố ý để test)
 
   strategy:
     canary:
+      analysis:
+        templates:
+          - templateName: success-rate-check
+            # Chạy AnalysisTemplate này SONG SONG với tất cả steps (background)
+        args:
+          - name: service-name
+            value: api
+
       steps:
         - setWeight: 25
-          # Bước 1: Chuyển 25% traffic sang Pod mới (canary)
-          # 1 trong 4 Pod = 25% là Pod version mới
-        - analysis:
-            templates:
-              - templateName: success-rate-check
-              # Tham chiếu AnalysisTemplate đã khai báo trong analysis.yaml
-            args:
-              - name: service-name
-                value: api
-                # Truyền tham số vào template (hiện tại template không dùng arg này
-                # nhưng khai báo sẵn để mở rộng sau)
-        - setWeight: 50
-          # Bước 3: Nếu analysis pass → tăng lên 50% traffic
+          # t=0s: 1/4 Pod = canary, 3/4 Pod = stable
         - pause:
             duration: 30s
-          # Bước 4: Dừng 30 giây, quan sát metric trước khi promote 100%
+          # t=0→30s: giữ 25%, analysis vẫn chạy ngầm
+        - setWeight: 50
+          # t=30s: 2/4 Pod = canary
+        - pause:
+            duration: 30s
+          # t=30→60s: giữ 50%, analysis vẫn chạy ngầm
         - setWeight: 100
-          # Bước 5: Promote hoàn toàn — 100% traffic đến version mới
+          # t=60s: 100% traffic → canary → hoàn thành
 ```
 
-**Service đi kèm trong cùng file:**
+**Service đi kèm:**
 
 ```yaml
 kind: Service
@@ -672,11 +744,11 @@ metadata:
   name: api
 spec:
   ports:
-    - name: http     # Tên port — ServiceMonitor tham chiếu tên này
+    - name: http       # ServiceMonitor tham chiếu tên này để biết scrape port nào
       port: 8080
       targetPort: 8080
   selector:
-    app: api
+    app: api           # Tự động route đến cả stable lẫn canary Pod
   type: ClusterIP
 ```
 
@@ -687,39 +759,69 @@ spec:
 ```yaml
 apiVersion: argoproj.io/v1alpha1
 kind: AnalysisTemplate
-# CRD do Argo Rollouts cung cấp — định nghĩa cách "chấm điểm" một canary deployment
 metadata:
   name: success-rate-check
-  # Tên này PHẢI khớp với templateName trong api.yaml
+  # Tên PHẢI khớp với templateName trong api.yaml strategy.canary.analysis
 
 spec:
   metrics:
   - name: success-rate
     interval: 10s
-    # Chạy query Prometheus mỗi 10 giây trong suốt thời gian analysis
-    successCondition: result[0] == 0
-    # Điều kiện THÀNH CÔNG: kết quả query bằng 0 (không có lỗi 5xx)
+    # Query Prometheus mỗi 10 giây trong suốt thời gian canary
+
+    successCondition: result[0] >= 0.95
+    # ĐIỀU KIỆN PASS: success rate ≥ 95%
     # result[0] = phần tử đầu tiên của vector kết quả Prometheus
-    failureLimit: 1
-    # Chỉ cần 1 lần kết quả vi phạm successCondition → Analysis FAILED
-    # → Argo Rollouts tự động Rollback về version cũ ngay lập tức
+    # Nếu < 0.95 (tức < 95% request thành công) → tính là 1 lần fail
+
+    failureLimit: 3
+    # Cho phép tối đa 3 lần fail TRƯỚC KHI rollback
+    # (khác với docs cũ là 1 — hiện tại khoan dung hơn)
+    # Lần fail thứ 4 → Analysis = FAILED → Rollback tự động
+
     provider:
       prometheus:
         address: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
         # DNS nội bộ K8s:
-        #   kube-prometheus-stack-prometheus = tên Service của Prometheus
-        #   monitoring                       = namespace
-        #   svc.cluster.local                = suffix DNS nội bộ K8s
+        # kube-prometheus-stack-prometheus  = tên Service Prometheus
+        # monitoring                        = namespace
+        # svc.cluster.local                 = suffix DNS K8s
+
         query: |
-          sum(rate(flask_http_request_total{namespace="demo", status=~"5.*"}[1m])) or vector(0)
-          # Giải thích query:
-          #   flask_http_request_total  = metric tự động sinh bởi prometheus-flask-exporter
-          #   namespace="demo"          = lọc chỉ lấy metric từ namespace demo
-          #   status=~"5.*"             = regex: chỉ đếm HTTP status 5xx (500, 502, 503...)
-          #   rate(...[1m])             = tốc độ tăng trung bình trong 1 phút gần nhất
-          #   sum(...)                  = cộng tổng từ tất cả Pod
-          #   or vector(0)             = nếu không có metric nào → trả về 0 (tránh "no data" lỗi)
+          sum(rate(flask_http_request_total{namespace="demo", status!~"5.*"}[2m]))
+          /
+          (sum(rate(flask_http_request_total{namespace="demo"}[2m])) or vector(1))
 ```
+
+**Giải thích query chi tiết:**
+
+```
+Tử số:
+  flask_http_request_total{status!~"5.*"}   → request KHÔNG lỗi (2xx, 3xx, 4xx)
+  rate(...[2m])                             → tốc độ/giây trong 2 phút gần nhất
+  sum(...)                                  → cộng tổng từ tất cả Pod
+
+Mẫu số:
+  flask_http_request_total                  → TẤT CẢ request (mọi status code)
+  rate(...[2m])                             → tốc độ/giây trong 2 phút
+  or vector(1)                              → nếu chưa có request nào → trả 1
+                                              (tránh chia cho 0, kết quả = 1.0 = 100% → pass)
+
+Kết quả:
+  0.0  → 0% success (toàn lỗi)    → fail
+  0.94 → 94% success               → fail (< 0.95)
+  0.95 → 95% success               → pass (đúng ngưỡng)
+  1.0  → 100% success              → pass
+```
+
+**So sánh với cấu hình cũ:**
+
+| Thông số | Cũ | Hiện tại |
+|----------|-----|---------|
+| `successCondition` | `result[0] == 0` (đếm lỗi = 0) | `result[0] >= 0.95` (success rate ≥ 95%) |
+| `failureLimit` | 1 | 3 |
+| Query window | `[1m]` | `[2m]` (mượt mà hơn) |
+| Query loại | Đếm lỗi tuyệt đối | Tỷ lệ phần trăm thành công |
 
 ---
 
@@ -728,185 +830,234 @@ spec:
 ```yaml
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
-# CRD do Prometheus Operator cung cấp — cách khai báo "Prometheus hãy scrape service này"
 metadata:
   name: api
-  namespace: demo
-  # PHẢI cùng namespace với Service cần scrape
+  namespace: demo           # PHẢI cùng namespace với Service cần scrape
   labels:
     app: api
-    # Label này dùng để Prometheus Operator nhận diện ServiceMonitor
-    # Tuy nhiên: trong kube-prometheus-stack với serviceMonitorSelectorNilUsesHelmValues: false
-    # thì Prometheus scrape TẤT CẢ ServiceMonitor → không cần label đặc biệt
+    # Với serviceMonitorSelectorNilUsesHelmValues: false,
+    # Prometheus scrape TẤT CẢ ServiceMonitor → label chỉ để dễ filter
 
 spec:
   selector:
     matchLabels:
-      app: api
-    # Tìm Service có label app: api trong cùng namespace
-    # → Tìm thấy Service "api" trong api.yaml
+      app: api              # Tìm Service có label app: api trong namespace demo
   endpoints:
-    - port: http
-      # Tên port (phải khớp với name: http trong Service spec.ports)
-      path: /metrics
-      # Đường dẫn Prometheus sẽ GET để lấy metrics
-      # Flask app expose metrics tại /metrics nhờ prometheus-flask-exporter
-      interval: 15s
-      # Prometheus scrape /metrics mỗi 15 giây
+    - port: http            # Tên port (khớp với name: http trong Service)
+      path: /metrics        # Flask app expose metrics tại đây
+      interval: 15s         # Prometheus GET /metrics mỗi 15 giây
 ```
-
----
-
-### `k8s-api/alerts.yaml` — PrometheusRule
-
-```yaml
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
-# CRD do Prometheus Operator — định nghĩa alerting rules
-metadata:
-  name: api-alerts
-  namespace: monitoring
-  # Đặt trong namespace monitoring (nơi Prometheus chạy)
-  labels:
-    release: kube-prometheus-stack
-    # QUAN TRỌNG: Label này để Prometheus Operator biết rule này thuộc về stack nào
-    # Phải khớp với label selector của PrometheusRule trong Helm chart
-
-spec:
-  groups:
-  - name: api-health
-    # Tên nhóm rule — hiển thị trong Prometheus UI
-    rules:
-    - alert: ApiHighErrorRate
-      # Tên alert — hiển thị trong Alertmanager
-      expr: sum(rate(flask_http_request_total{namespace="demo", status=~"5.*"}[1m])) > 0
-      # Điều kiện kích hoạt alert: tỷ lệ lỗi 5xx > 0
-      # Cùng query với AnalysisTemplate nhưng threshold khác nhau
-      for: 10s
-      # Alert chỉ firing nếu điều kiện đúng LIÊN TỤC trong 10 giây
-      # Tránh false alarm do spike ngắn hạn
-      labels:
-        severity: critical
-        # Label phân loại độ nghiêm trọng — Alertmanager dùng để route alert
-      annotations:
-        summary: "Ứng dụng API tại namespace demo đang bị lỗi nghiêm trọng!"
-        description: "Tỷ lệ lỗi 5xx vượt ngưỡng an toàn trong quá trình thả Canary."
-        # Thông tin chi tiết hiển thị trong notification (Slack, email...)
-```
-
-**Sự khác nhau giữa Alert và AnalysisTemplate:**
-
-| | AnalysisTemplate | PrometheusRule |
-|---|---|---|
-| Mục đích | Quyết định rollback/promote | Thông báo cho team |
-| Kích hoạt | Trong lúc Canary deploy | Bất kỳ lúc nào |
-| Hành động | Rollback tự động | Gửi notification |
-| Quản lý bởi | Argo Rollouts | Prometheus/Alertmanager |
 
 ---
 
 ## 10. Monitoring Stack — Prometheus & Alerting
 
-### Mối quan hệ giữa các component
+### Mối quan hệ các component
 
 ```
-prometheus-flask-exporter (trong Flask app)
-        │ expose /metrics
-        ▼
-ServiceMonitor (servicemonitor.yaml)
-        │ hướng dẫn Prometheus Operator
-        ▼
-Prometheus Operator (trong kube-prometheus-stack)
-        │ tự động cấu hình Prometheus
-        ▼
-Prometheus Server
-        ├── scrape /metrics mỗi 15s
-        ├── evaluate PrometheusRule (alerts.yaml) → Alertmanager
-        └── serve PromQL queries → AnalysisTemplate (analysis.yaml)
+Flask App (api Pod)
+  │ expose GET /metrics
+  │ metric: flask_http_request_total{status, method, path}
+  ▼
+ServiceMonitor (namespace: demo)
+  │ khai báo: scrape Service "api" port "http" path "/metrics" mỗi 15s
+  ▼
+Prometheus Operator (namespace: monitoring)
+  │ đọc ServiceMonitor → tự động cấu hình Prometheus scrape job
+  ▼
+Prometheus Server (namespace: monitoring)
+  │
+  ├──▶ Lưu time-series data
+  │
+  ├──▶ Evaluate PrometheusRule mỗi ~30s
+  │       └── alerts.yaml: ApiHighErrorRate
+  │               condition: 5xx rate > 0 liên tục 10s → FIRING
+  │               → Alertmanager → route → Slack/email/PagerDuty
+  │
+  └──▶ Serve PromQL API (port 9090)
+          └── AnalysisTemplate query mỗi 10s
+                  └── success_rate < 0.95 × 3 lần → Rollback
 ```
-
-### Metric chính được dùng
-
-`flask_http_request_total` — Counter tự động sinh bởi `prometheus-flask-exporter`:
-- **Labels**: `method`, `status`, `path`, `namespace` (thêm bởi K8s)
-- **Ý nghĩa**: Tổng số HTTP request đã xử lý, phân loại theo status code
-
-**Cách query lỗi 5xx:**
-```promql
-sum(rate(flask_http_request_total{namespace="demo", status=~"5.*"}[1m])) or vector(0)
-```
-- `rate()[1m]` → tốc độ request/giây trung bình trong 1 phút
-- `status=~"5.*"` → chỉ đếm lỗi server
-- `or vector(0)` → trả 0 nếu app chưa nhận request nào (tránh "no data")
 
 ---
 
-## 11. Ứng dụng Flask (`app/`)
+## 11. Alert Timeline — Khi nào, bao lâu, điều gì xảy ra
+
+### `k8s-api/alerts.yaml` — PrometheusRule chi tiết
+
+```yaml
+spec:
+  groups:
+  - name: api-health
+    rules:
+    - alert: ApiHighErrorRate
+      expr: sum(rate(flask_http_request_total{namespace="demo", status=~"5.*"}[1m])) > 0
+      # Biểu thức: tổng tốc độ lỗi 5xx trong 1 phút > 0
+      # Tức là: chỉ cần có BẤT KỲ lỗi 5xx nào → expr = true
+      for: 10s
+      # Alert phải đúng LIÊN TỤC 10 giây → mới chuyển sang FIRING
+      # Trong 10s này: trạng thái là PENDING
+      labels:
+        severity: critical
+      annotations:
+        summary: "Ứng dụng API tại namespace demo đang bị lỗi nghiêm trọng!"
+        description: "Tỷ lệ lỗi 5xx vượt ngưỡng an toàn trong quá trình thả Canary."
+```
+
+### Timeline chi tiết của Alert
+
+```
+Thời điểm 0s:
+  Flask app bắt đầu trả HTTP 500
+  flask_http_request_total{status="500"} bắt đầu tăng
+        │
+        ▼
+Thời điểm 0s → 15s:
+  Prometheus CHƯA biết — chưa scrape lần nào kể từ khi lỗi
+  (scrape interval = 15s)
+        │
+        ▼
+Thời điểm ~15s:
+  Prometheus scrape /metrics lần đầu sau khi lỗi xảy ra
+  rate(5xx[1m]) > 0 → expression = TRUE lần đầu
+  Alert chuyển sang trạng thái: PENDING
+        │
+        ▼
+Thời điểm ~15s → ~25s:
+  Alert ở trạng thái PENDING
+  Prometheus tiếp tục evaluate (mỗi 30s theo default)
+  Điều kiện vẫn đúng
+        │
+        ▼
+Thời điểm ~25s (= ~15s + 10s for):
+  "for: 10s" đã thỏa mãn liên tục
+  Alert chuyển sang: FIRING
+        │
+        ▼
+Thời điểm ~25s:
+  Alertmanager nhận alert ApiHighErrorRate{severity="critical"}
+  Route alert theo cấu hình:
+    └── Gửi notification (Slack / email / PagerDuty)
+        │
+        ▼
+Tổng thời gian từ lỗi đầu tiên → team nhận notification:
+  ≈ 15s (scrape) + 10s (for) = ~25 giây
+  (có thể lên đến 45s nếu scrape vừa xong ngay trước khi lỗi)
+```
+
+### Trạng thái vòng đời của Alert
+
+```
+INACTIVE ──(expr true)──▶ PENDING ──(for: 10s)──▶ FIRING
+                                                      │
+                          ◀────(expr false)───────────┘
+                          (alert tự resolve khi hết lỗi)
+```
+
+| Trạng thái | Ý nghĩa | Hiển thị trên Prometheus UI |
+|-----------|---------|---------------------------|
+| INACTIVE | Không có lỗi | Không hiển thị |
+| PENDING | Có lỗi nhưng chưa đủ 10s liên tục | Màu vàng |
+| FIRING | Có lỗi liên tục ≥ 10s → Alertmanager gửi notification | Màu đỏ |
+
+### So sánh Alert vs AnalysisTemplate — hai cơ chế bảo vệ độc lập
+
+| Tiêu chí | PrometheusRule (Alert) | AnalysisTemplate |
+|----------|----------------------|-----------------|
+| Mục đích | Thông báo team có vấn đề | Tự động rollback deployment |
+| Kích hoạt khi | `5xx rate > 0` liên tục 10s | `success_rate < 95%` × 3 lần |
+| Thời gian phản ứng | ~25 giây (scrape + for) | ~30 giây (10s × 3 lần) |
+| Hành động | Gửi Slack/email/PagerDuty | Scale down canary, restore traffic |
+| Hoạt động khi | Bất kỳ lúc nào (production, staging) | Chỉ trong lúc Canary deployment |
+| Quản lý bởi | Prometheus + Alertmanager | Argo Rollouts Controller |
+| Cần Canary đang chạy? | Không | Có |
+
+### Kịch bản: Canary bị lỗi — timeline kết hợp
+
+```
+t=0s    Canary deploy bắt đầu, 25% traffic → v2
+t=0s    Analysis bắt đầu chạy ngầm (query mỗi 10s)
+t=0s    Flask v2 trả 500 (ERROR_RATE > 0)
+
+t=10s   Analysis query lần 1: success_rate < 0.95 → fail count = 1
+t=15s   Prometheus scrape: phát hiện 5xx, Alert → PENDING
+
+t=20s   Analysis query lần 2: success_rate < 0.95 → fail count = 2
+t=25s   Alert → FIRING, Alertmanager gửi notification đến team
+
+t=25s   Alert "for: 10s" hoàn thành → team nhận Slack/email
+
+t=30s   Analysis query lần 3: success_rate < 0.95 → fail count = 3
+        failureLimit = 3 đã đạt → Analysis = FAILED
+        Argo Rollouts: scale down canary, 100% traffic → stable (v1)
+
+t=35s   Rollback hoàn tất, không còn Pod v2
+        flask 500 rate = 0 → Alert chuyển về INACTIVE
+        Team nhận notification "resolved"
+```
+
+---
+
+## 12. Ứng dụng Flask (`app/`)
 
 ### `app/app.py`
 
 ```python
-app = Flask(__name__)
+from prometheus_flask_exporter import PrometheusMetrics
 PrometheusMetrics(app)
-# Một dòng này tự động:
-# - Tạo endpoint GET /metrics
-# - Đếm tất cả request theo method, status, path
-# - Đo latency của mỗi request
+# Một dòng — tự động:
+# • Tạo endpoint GET /metrics (Prometheus format)
+# • Đếm tất cả request: flask_http_request_total{method, status, path}
+# • Đo latency: flask_http_request_duration_seconds
 
 ERR = float(os.getenv("ERROR_RATE", "0"))
-# Đọc từ biến môi trường ERROR_RATE trong Deployment
-# Mặc định = 0 (không lỗi)
-# Đổi thành "0.5" → 50% request trả 500
+# Giá trị từ env var ERROR_RATE trong Deployment
+# 0   → không bao giờ lỗi
+# 0.5 → 50% request trả 500
+# 1.0 → 100% request trả 500 → analysis fail ngay
 
 VER = os.getenv("VERSION", "v1")
-# Phiên bản app — trả về trong JSON để phân biệt stable vs canary Pod
+# Trả về trong response JSON → phân biệt stable/canary Pod khi test
 
 @app.get("/")
 def index():
     if random.random() < ERR:
         return jsonify(error="injected", version=VER), 500
-        # Giả lập lỗi ngẫu nhiên theo tỷ lệ ERR
-        # Dùng để test canary analysis và alert
     return jsonify(ok=True, version=VER)
-    # Response bình thường kèm version để biết Pod nào đang phục vụ
 
 @app.get("/healthz")
 def healthz():
     return "ok", 200
-    # Endpoint cho readinessProbe của Kubernetes
-    # LUÔN trả 200 dù ERROR_RATE cao — Pod vẫn được đưa vào rotation
-    # (lỗi là intentional, không phải Pod bị unhealthy)
+    # LUÔN trả 200 — readinessProbe pass dù ERROR_RATE = 1
+    # Pod vẫn nhận traffic (lỗi là cố ý để test canary)
 ```
 
 ### `app/Dockerfile`
 
 ```dockerfile
-FROM python:3.12-slim
-# Base image nhỏ gọn — không có các tool debug thừa
+FROM python:3.12-slim          # Image nhỏ gọn
 
 RUN pip install flask prometheus-flask-exporter
-# Cài 2 package cần thiết
-# flask: web framework
-# prometheus-flask-exporter: tự động expose /metrics
 
 COPY app.py /app/app.py
 WORKDIR /app
-ENV FLASK_APP=app.py    # Chỉ định file app cho lệnh flask run
-EXPOSE 8080             # Khai báo port (documentation, không tự mở port)
+ENV FLASK_APP=app.py
+EXPOSE 8080
 CMD ["flask", "run", "--host=0.0.0.0", "--port=8080"]
-# --host=0.0.0.0: lắng nghe trên tất cả network interface (cần thiết trong container)
-# Nếu chỉ dùng 127.0.0.1 (default) → không thể truy cập từ ngoài container
+# --host=0.0.0.0 BẮT BUỘC trong container
+# Nếu dùng 127.0.0.1 (default) → chỉ accessible từ trong container
 ```
 
-**Build image:**
+**Build và tag:**
 ```bash
 docker build -t w9-api:1 app/
-# Tag "w9-api:1" phải khớp với image: w9-api:1 trong api.yaml
+# Tag "w9-api:1" phải khớp với image: w9-api:1 trong k8s-api/api.yaml
+# imagePullPolicy: IfNotPresent → K8s dùng image local, không pull registry
 ```
 
 ---
 
-## 12. CI/CD — GitHub Actions
+## 13. CI/CD — GitHub Actions
 
 ### `.github/workflows/validate.yml`
 
@@ -916,56 +1067,64 @@ on:
   pull_request:
     paths:
       - "k8s/**"
-      # Chỉ chạy workflow khi có file thay đổi trong thư mục k8s/
-      # Tránh chạy khi chỉ sửa README hay file khác không liên quan
+      # Chỉ trigger khi thay đổi file trong k8s/
+      # Sửa README, argocd/, k8s-api/ → không trigger
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        # Checkout code về runner để có thể đọc file
 
       - run: |
-          curl -sSLO https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
-          # Download kubeconform v0.6.7 — version được ghim cụ thể để CI ổn định
-          tar -xzf kubeconform-linux-amd64.tar.gz && sudo mv kubeconform /usr/local/bin/
-          # Giải nén và cài vào PATH
-
+          curl -sSLO https://github.com/yannh/kubeconform/releases/download/v0.6.7/...
+          # v0.6.7 — ghim version để CI ổn định
           kubeconform -strict -summary k8s/
-          # -strict: validate nghiêm ngặt — không cho phép field không biết trong schema
-          # -summary: in tóm tắt (số file pass/fail) thay vì log từng file
-          # k8s/: chỉ validate thư mục này (không validate k8s-api/ vì có CRD custom)
+          # -strict: reject field không có trong schema → catch typo
+          # -summary: chỉ in tóm tắt, không log từng resource
+          # k8s/ only: không validate k8s-api/ vì có CRD custom
 ```
 
-**Tại sao KHÔNG validate `k8s-api/`?** Các file trong `k8s-api/` dùng CRD (Rollout, AnalysisTemplate, ServiceMonitor, PrometheusRule) — kubeconform không biết schema của những resource này nên sẽ báo lỗi sai. Cần thêm flag `--schema-location` nếu muốn validate CRD.
+**Tại sao KHÔNG validate `k8s-api/`:**
+- `k8s-api/` chứa CRD: `Rollout`, `AnalysisTemplate`, `ServiceMonitor`, `PrometheusRule`
+- kubeconform không biết schema của những CRD này → báo lỗi sai
+- Cần thêm `--schema-location` với CRD schema nếu muốn validate
 
 ---
 
-## 13. Bảng tóm tắt các thông số quan trọng
+## 14. Bảng tóm tắt các thông số quan trọng
 
-### Sync Wave — thứ tự deploy
+### Timing toàn hệ thống
 
-| Wave | File | Resource | Lý do |
-|------|------|----------|-------|
-| -1 | namespace.yaml | Namespace demo | Namespace phải tồn tại trước tiên |
-| 0 | fe/configmap.yaml | ConfigMap fe-config1 | Config có trước Pod |
-| 0 | be/configmap.yaml | ConfigMap be-config1 | Config có trước Pod |
-| 0 | web.yaml (CM) | ConfigMap web-config | Config có trước Pod |
-| 1 | fe/deployment.yaml | Deployment frontend | Pod sau khi có config |
-| 1 | be/deployment.yaml | Deployment backend | Pod sau khi có config |
-| 1 | web.yaml (Deploy) | Deployment web | Pod sau khi có config |
-| 2 | fe/service.yaml | Service frontend-service | Expose sau khi Pod Running |
-| 2 | be/service.yaml | Service backend-service | Expose sau khi Pod Running |
-| 2 | web.yaml (Svc) | Service web | Expose sau khi Pod Running |
+| Sự kiện | Thời gian |
+|---------|----------|
+| ArgoCD polling Git | Mỗi ~3 phút |
+| Prometheus scrape /metrics | Mỗi 15 giây |
+| AnalysisTemplate query | Mỗi 10 giây |
+| Alert PENDING → FIRING | Sau 10 giây liên tục có lỗi |
+| Thời gian từ lỗi → alert notification | ~25 giây |
+| Thời gian từ lỗi → rollback hoàn tất | ~30–60 giây |
+| Canary 25% pause | 30 giây |
+| Canary 50% pause | 30 giây |
+| Tổng thời gian canary (không lỗi) | ~60 giây |
 
-### Port mapping — cách truy cập local
+### Thông số Analysis
 
-| Service | Lệnh port-forward | URL local |
-|---------|------------------|-----------|
+| Thông số | Giá trị | Ý nghĩa |
+|----------|---------|--------|
+| `interval` | 10s | Query Prometheus mỗi 10 giây |
+| `successCondition` | `result[0] >= 0.95` | Success rate phải ≥ 95% |
+| `failureLimit` | 3 | Cho phép tối đa 3 lần fail |
+| Query window | `[2m]` | Tính rate trong 2 phút gần nhất |
+| Rollback trigger | Lần fail thứ 4 | Sau ~30 giây lỗi liên tục |
+
+### Port-forward để truy cập local
+
+| Service | Lệnh | URL |
+|---------|------|-----|
 | Frontend | `kubectl port-forward svc/frontend-service 8080:80 -n demo` | http://localhost:8080 |
 | Backend | `kubectl port-forward svc/backend-service 8081:80 -n demo` | http://localhost:8081/api/profile |
-| API (Flask) | `kubectl port-forward svc/api 8082:8080 -n demo` | http://localhost:8082 |
+| Flask API | `kubectl port-forward svc/api 8082:8080 -n demo` | http://localhost:8082 |
 | Prometheus | `kubectl port-forward svc/kube-prometheus-stack-prometheus 9090:9090 -n monitoring` | http://localhost:9090 |
 | Grafana | `kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n monitoring` | http://localhost:3000 |
 
@@ -974,20 +1133,41 @@ jobs:
 | Namespace | Chứa gì |
 |-----------|--------|
 | `argocd` | ArgoCD controller + tất cả Application object |
-| `demo` | frontend, backend, web, api (Flask) |
-| `monitoring` | Prometheus, Grafana, Alertmanager, node-exporter |
-| `argo-rollouts` | Argo Rollouts controller |
+| `demo` | frontend, backend, web, api (Flask Rollout) |
+| `monitoring` | Prometheus, Grafana, Alertmanager, Operator, exporters |
+| `argo-rollouts` | Argo Rollouts Controller |
 
 ### Canary steps summary
 
-| Bước | Action | Ý nghĩa |
-|------|--------|--------|
-| 1 | setWeight: 25 | 1/4 Pod mới nhận traffic |
-| 2 | analysis | Query Prometheus, rollback nếu có lỗi 5xx |
-| 3 | setWeight: 50 | 2/4 Pod mới nhận traffic |
-| 4 | pause 30s | Quan sát thêm 30 giây |
-| 5 | setWeight: 100 | Promote hoàn toàn version mới |
+| Step | Thời điểm | Traffic canary | Analysis |
+|------|-----------|---------------|---------|
+| setWeight: 25 | t=0s | 25% | Bắt đầu chạy ngầm |
+| pause: 30s | t=0→30s | 25% | Đang chạy ngầm |
+| setWeight: 50 | t=30s | 50% | Đang chạy ngầm |
+| pause: 30s | t=30→60s | 50% | Đang chạy ngầm |
+| setWeight: 100 | t=60s | 100% | Tự dừng |
+
+### Cách test Canary Rollback
+
+```bash
+# 1. Sửa ERROR_RATE trong k8s-api/api.yaml
+env:
+  - name: ERROR_RATE
+    value: "0.5"    # 50% request lỗi
+
+# 2. Push lên Git
+git add k8s-api/api.yaml
+git commit -m "test: inject 50% error rate for canary"
+git push
+
+# 3. Theo dõi
+kubectl argo rollouts get rollout api -n demo --watch
+# Sau ~30-60 giây sẽ thấy status: Degraded và rollback tự động
+
+# 4. Check Alert trên Prometheus
+# http://localhost:9090/alerts → ApiHighErrorRate = FIRING
+```
 
 ---
 
-*Tài liệu này được tạo tự động từ source code — không chỉnh sửa bất kỳ file YAML hoặc Python nào.*
+*Tài liệu này phản ánh đúng trạng thái source code hiện tại. Không có dòng code nào bị chỉnh sửa.*
