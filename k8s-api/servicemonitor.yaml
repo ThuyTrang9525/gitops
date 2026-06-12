@@ -5,7 +5,7 @@ metadata:
   namespace: demo            # <--- BẮT BUỘC: Phải nằm chung namespace với app api
   labels:
     app: api
-    release: kube-prometheus-stack # <--- CHÌA KHÓA: Để Prometheus Operator nhận diện
+    # release: kube-prometheus-stack # <--- CHÌA KHÓA: Để Prometheus Operator nhận diện
 spec:
   selector:
     matchLabels:
